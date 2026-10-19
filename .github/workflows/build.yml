@@ -68,6 +68,9 @@ jobs:
     - name: Build Teddy CLI
       run: dotnet build Teddy/Teddy.csproj -c Release
 
+    - name: Run tests
+      run: dotnet test TonieAudio.Tests/TonieAudio.Tests.csproj -c Release
+
     - name: Publish Teddy CLI (osx-arm64)
       run: dotnet publish Teddy/Teddy.csproj -c Release -r osx-arm64 --self-contained -p:PublishSingleFile=true -o publish/osx-arm64
 

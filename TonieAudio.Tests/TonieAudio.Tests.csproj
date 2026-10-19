@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RollForward>LatestMajor</RollForward>
+    <IsPackable>false</IsPackable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\TonieAudio\TonieAudio.csproj" />
+    <ProjectReference Include="..\Concentus\Concentus.csproj" />
+    <ProjectReference Include="..\Concentus.Oggfile\Concentus.Oggfile.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- source-linked: the TeddyBench assembly is net48 WinForms and cannot load here -->
+    <Compile Include="..\TeddyBench\ISO15693.cs" Link="ISO15693.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.6.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.4" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
