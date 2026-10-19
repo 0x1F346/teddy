@@ -5,7 +5,7 @@ This document is a plan for getting the teddy tooling running on macOS. It is ba
 ## Headline assessment
 
 | Project | Target | Portability |
-|---|---|---|
+| --- | --- | --- |
 | `Concentus`, `Concentus.Oggfile`, `ID3` | netstandard2.0 | ✅ Pure managed code — portable as-is |
 | `TonieAudio` | netstandard2.0 | ⚠️ Portable except two NAudio classes in the encode path (see Phase 2) |
 | `Teddy` (CLI) | net48 | ⚠️ Pure console app with **zero** WinForms usage, but pinned to .NET Framework. One retarget + the encode fix away from running natively on macOS |
@@ -46,11 +46,11 @@ These compile with warnings on .NET 8 but still run; fix opportunistically (also
 Encoding goes through two NAudio classes that P/Invoke into Windows media stacks. These are the **only** native dependencies in the entire audio pipeline:
 
 | Call site | Class | Native dependency |
-|---|---|---|
+| --- | --- | --- |
 | `TonieAudio/TonieAudio.cs:504`, `:543` | `Mp3FileReader` | `msacm32.dll` (ACM MP3 decoder) |
 | `TonieAudio/TonieAudio.cs:505`, `:557` | `MediaFoundationResampler` | `mfplat.dll` / Media Foundation COM |
 
-The resampler is used for **both** MP3 and OGG input, so on macOS every encode throws `DllNotFoundException` (swallowed at `TonieAudio.cs:607-611` as "Failed processing <file>").
+The resampler is used for **both** MP3 and OGG input, so on macOS every encode throws `DllNotFoundException` (swallowed at `TonieAudio.cs:607-611` as "Failed processing \<file\>").
 
 Fix, all in `TonieAudio`:
 

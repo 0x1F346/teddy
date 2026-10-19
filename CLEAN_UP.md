@@ -7,42 +7,53 @@ Findings from a deep review of the first-party code (`Teddy/`, `TeddyBench/`, `T
 ## 1. High-impact bugs
 
 ### 1.1 CLI `.ogg` encoding is broken with default settings ✅ verified
-`Teddy/Program.cs:175` defaults bitrate to 96; `:601` passes `bitRate * 1000` (96000) into `TonieAudio`, which hands it to the Opus **decoder as the sample rate** (`TonieAudio/TonieAudio.cs:547`: `new OpusWaveStream(..., bitRate, channels)`). Concentus only accepts 8/12/16/24/48 kHz, so every `.ogg` source fails with the generic "Failed processing <file>". The GUI only works by accident (it always passes 48000).
+
+`Teddy/Program.cs:175` defaults bitrate to 96; `:601` passes `bitRate * 1000` (96000) into `TonieAudio`, which hands it to the Opus **decoder as the sample rate** (`TonieAudio/TonieAudio.cs:547`: `new OpusWaveStream(..., bitRate, channels)`). Concentus only accepts 8/12/16/24/48 kHz, so every `.ogg` source fails with the generic "Failed processing \<file\>". The GUI only works by accident (it always passes 48000).
 **Fix:** decode at a fixed 48000 Hz; pass bitrate and sample rate as separate parameters.
 
 ### 1.2 UI deadlock in the crash reporter
+
 `TeddyMain.cs:2454` blocks the UI thread with `DiagnosticsSendInfo(...).Result`; `DiagnosticsSendInfo` (`:2028`) awaits `PostAsync` without `ConfigureAwait(false)`, and its continuation needs the UI thread — classic sync-over-async deadlock. Hits anyone who agrees to report a UI-thread exception.
 **Fix:** make the handler async (or `ConfigureAwait(false)` throughout + `GetAwaiter().GetResult()` as a stopgap).
 
 ### 1.3 `teddy -m info -f json` emits invalid JSON ✅ verified
+
 `TonieAudio/TonieTools.cs:102`: `bool first = false;` is never set, so every entry is prefixed with a comma → output starts `[` `,` and never parses. Also in `DumpInfo`:
+
 - `:153-155`: `Array.IndexOf(info.AudioIds, AudioId)` can return −1 → `info.Hash[-1]` throws whenever a hash matches but the audio ID isn't listed.
 - `:154`, `:172`: writes into the **shared** `TonieInfo` objects (resizes hash arrays), corrupting later lookups in the GUI (`TeddyMain.cs:2054`).
 - `:228`: prepends an extra `0` chapter even when chapters already start at 0.
 
 ### 1.4 ProtoCoder never decodes booleans ✅ verified
+
 `TonieAudio/ProtoCoder.cs:200`: `case "Bool":` — but `Type.Name` for `bool` is `"Boolean"`, so `FileHeader.Usable` (the sfx.bin flag, `TonieAudio.cs:57-59`) silently never deserializes. Also in `ProtoCoder.cs`: `lastField` (`:172`) is never updated so the field-order check is dead; the signed `Int*[]` cases (`:258-275`) are unreachable; fixed32/fixed64 wire types are not consumed, desyncing the parser.
 
 ### 1.5 The GUI "Delete..." button does nothing ✅ verified
+
 `btnDelete_Click` is an empty method (`TeddyMain.cs:1367-1369`) yet wired up and enabled (`TeddyMain.Designer.cs:477`, `TeddyMain.cs:816`).
 **Fix:** route it to the existing `DeleteSelected()`.
 
 ### 1.6 "Download tonies.json on startup" setting is doubly broken
+
 - With the download disabled, `TeddyMain.cs:193` loads `customTonies.json` (a `Dictionary<string,string>`) **as the main tonie database** instead of the cached `tonies.json` → parse failure → crash-report prompt on every startup.
 - The menu item never toggles its checkmark (`:2467-2471` flips `DownloadJson` off the *stale* `Checked` value and never updates `Checked`; no `CheckOnClick` in the Designer), so the setting can't be switched back from the UI.
 
 ### 1.7 Encoder drops silence and pads track ends
+
 - `TonieAudio.cs:516`, `:577`: any 60 ms block that is all zeros is skipped entirely (`buffer.Where(v => v != 0).Count() == 0`), shortening deliberate pauses; the check also scans the whole buffer rather than just `bytesReturned`.
 - `ConvertToFloat` (`:644`) sizes output from `pcmBuffer.Length`, appending up to 60 ms of zeros at the end of every track.
 
 ### 1.8 Pn5180Esp unlock can never succeed
+
 `Pn5180Esp.cs:156`, `:274`: `response.Replace("\r", "")` — the return value is discarded (strings are immutable), so `"ok\r"` never equals `"ok"`. `UnlockTag` also ignores its `pass` argument (always sends `"u"`), and the `uid == null` branch at `:68` is dead (`GetUID` never returns null).
 
 ### 1.9 A reader exception permanently stops tag scanning
+
 `Proxmark3.ReadMemory` / `EmulateTag` / `MeasureAntenna` (`Proxmark3.cs:1474-1532`) call `StopThread()` … `StartThread()` without `try/finally`; commit `6a95c2e` wrapped the *callers* in empty catches, so after one exception scanning silently dies. Also: `:1493` uses `throw ex;` (destroys stack trace); `MeasureAntenna` returns a zero-filled result on failure (`:1527-1531`), making the UI's "Measurement failed" branch unreachable.
 **Fix:** `try/finally` around the stop/start, rethrow with `throw;`, return null on failed measurement.
 
 ### 1.10 File-management edge cases in the GUI
+
 - Deleting or re-assigning a "flat" file (one sitting directly in `CurrentDirectory`, listed via `TeddyMain.cs:849-867`) deletes `info.Directory` — which is the CONTENT/root folder itself (`:1549-1558`, `:1606-1607`).
 - `DeleteSelected` returns early on Cancel/error (`:1582`, `:1612`) without restarting the analyze thread.
 - Failed encode/copy leaves the UI stuck: every failure path in `EncodeFile` (`:1297-1349`) and `CopyFile` (`:1208-1242`) is `MessageBox.Show(...); return;` from a background thread and only the success path restores the UI.

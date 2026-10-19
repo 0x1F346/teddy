@@ -69,6 +69,9 @@ namespace TeddyBench
             }
         }
 
+        /* keep the log (and the TextBox rewritten from it) from growing without bound */
+        private const int MaxLogLength = 256 * 1024;
+
         public static void Log(eLogLevel level, string message)
         {
             if(level < LogLevel)
@@ -76,9 +79,18 @@ namespace TeddyBench
                 return;
             }
 
+            if (Instance == null)
+            {
+                return;
+            }
+
             lock (Instance.LogString)
             {
                 Instance.LogString.AppendLine(message);
+                if (Instance.LogString.Length > MaxLogLength)
+                {
+                    Instance.LogString.Remove(0, Instance.LogString.Length - MaxLogLength / 2);
+                }
                 Instance.LastTextUpdate = DateTime.Now;
             }
         }

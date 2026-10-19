@@ -44,14 +44,15 @@ namespace TeddyBench
         {
             try
             {
-                Mp3 mp3 = new Mp3(f, Mp3Permissions.Read);
-
-                Id3Tag ret = mp3.GetAllTags().Where(t => t.Track.IsAssigned).FirstOrDefault();
-
-                return ret;
+                using (Mp3 mp3 = new Mp3(f, Mp3Permissions.Read))
+                {
+                    return mp3.GetAllTags().Where(t => t.Track.IsAssigned).FirstOrDefault();
+                }
             }
             catch(Exception ex)
             {
+                /* expected for files without ID3 tags, e.g. ogg */
+                LogWindow.Log(LogWindow.eLogLevel.DebugVerbose, "No usable ID3 tag in '" + f + "': " + ex.Message);
                 return null;
             }
         }
