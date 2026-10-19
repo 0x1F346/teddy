@@ -324,7 +324,8 @@ namespace TonieFile
         {
             foreach (var source in sources)
             {
-                string item = source.Trim('"').Trim(Path.DirectorySeparatorChar);
+                /* only trim trailing separators - a leading one is the root of an absolute unix path */
+                string item = source.Trim('"').TrimEnd(Path.DirectorySeparatorChar);
 
                 if (Directory.Exists(item))
                 {

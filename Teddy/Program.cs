@@ -199,9 +199,9 @@ namespace Teddy
             }
             catch (OptionException e)
             {
-                Console.Write("Teddy.exe: ");
+                Console.Write("teddy: ");
                 Console.WriteLine(e.Message);
-                Console.WriteLine("Try `Teddy.exe --help' for more information.");
+                Console.WriteLine("Try `teddy --help' for more information.");
                 return;
             }
 
@@ -832,10 +832,10 @@ limitations under the License.
             Console.WriteLine("                         (build " + GetVersion() + ")");
             Console.WriteLine("");
             Console.WriteLine("Start with:");
-            Console.WriteLine("  Teddy.exe -m decode [options] <toniefile>          - Dump tonie file content");
-            Console.WriteLine("  Teddy.exe -m info [options] <toniefile>            - Show header details");
-            Console.WriteLine("  Teddy.exe -m encode [options] <folder>             - Create a tonie file from all MP3 in this folder");
-            Console.WriteLine("  Teddy.exe -m encode [options] <file1> <file2> ...  - Create a tonie file from specified MP3 files");
+            Console.WriteLine("  teddy -m decode [options] <toniefile>          - Dump tonie file content");
+            Console.WriteLine("  teddy -m info [options] <toniefile>            - Show header details");
+            Console.WriteLine("  teddy -m encode [options] <folder>             - Create a tonie file from all MP3 in this folder");
+            Console.WriteLine("  teddy -m encode [options] <file1> <file2> ...  - Create a tonie file from specified MP3 files");
             Console.WriteLine("");
             Console.WriteLine("Options:");
             p.WriteOptionDescriptions(Console.Out);
