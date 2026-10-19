@@ -1,4 +1,4 @@
-name: TeddyBench Windows
+name: Build
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
 
-  build:
+  build-windows:
 
     strategy:
       matrix:
@@ -24,18 +24,18 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Install .NET Core
+    - name: Install .NET SDK
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: 6.0.x
+        dotnet-version: 8.0.x
 
     - name: Setup MSBuild.exe
-      uses: microsoft/setup-msbuild@v1
+      uses: microsoft/setup-msbuild@v2
       with:
         msbuild-architecture: x64
 
-    - name: Nuget restore
-      run: nuget restore $env:Solution_Name
+    - name: Restore
+      run: dotnet restore $env:Solution_Name
 
     - name: Build the application
       run: msbuild $env:Solution_Name -t:rebuild -property:Configuration=$env:Configuration
@@ -49,3 +49,30 @@ jobs:
         path: TeddyBench/bin/${{ matrix.configuration }}/net48/win10-x64/TeddyBench.exe
       env:
         Configuration: ${{ matrix.configuration }}
+
+  build-macos:
+
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Install .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+
+    - name: Build Teddy CLI
+      run: dotnet build Teddy/Teddy.csproj -c Release
+
+    - name: Publish Teddy CLI (osx-arm64)
+      run: dotnet publish Teddy/Teddy.csproj -c Release -r osx-arm64 --self-contained -p:PublishSingleFile=true -o publish/osx-arm64
+
+    - name: Upload CLI artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: teddy-osx-arm64
+        path: publish/osx-arm64/Teddy
