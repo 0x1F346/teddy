@@ -34,6 +34,8 @@ using Concentus.Oggfile;
 using Concentus.Structs;
 using Id3;
 using NAudio.Wave;
+using NAudio.Wave.SampleProviders;
+using NLayer.NAudioSupport;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -112,116 +114,118 @@ namespace TonieFile
             minGranule = long.MaxValue;
             maxGranule = 0;
             highestGranule = 0;
-            var file = File.Open(Filename, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            long lastPos = 0x1000;
-            long curPos = 0x1000;
-            ulong lastGranule = 0;
-            byte[] oggPageBuf = new byte[27];
-
-            while (curPos < file.Length)
+            using (var file = File.Open(Filename, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                lastPos = curPos;
+                long lastPos = 0x1000;
+                long curPos = 0x1000;
+                ulong lastGranule = 0;
+                byte[] oggPageBuf = new byte[27];
 
-                file.Seek(curPos, SeekOrigin.Begin);
-                file.Read(oggPageBuf, 0, oggPageBuf.Length);
-
-                if (oggPageBuf[0] != 'O' || oggPageBuf[1] != 'g' || oggPageBuf[2] != 'g')
+                while (curPos < file.Length)
                 {
-                    Console.WriteLine("[ERROR] Not an Ogg page header at 0x" + curPos.ToString("X8"));
-                    break;
-                }
+                    lastPos = curPos;
 
-                ulong granule = BitConverter.ToUInt64(oggPageBuf, 6);
-                uint pageNum = BitConverter.ToUInt32(oggPageBuf, 0x12);
-                byte segmentsCount = oggPageBuf[26];
-                byte[] segmentLengths = new byte[segmentsCount];
+                    file.Seek(curPos, SeekOrigin.Begin);
+                    file.Read(oggPageBuf, 0, oggPageBuf.Length);
 
-                if (!PageGranuleMap.ContainsKey(pageNum))
-                {
-                    PageGranuleMap.Add(pageNum, granule);
-                }
-
-                file.Read(segmentLengths, 0, segmentLengths.Length);
-
-                curPos += 27;
-                curPos += segmentLengths.Length;
-
-                foreach (var len in segmentLengths)
-                {
-                    totalSegments++;
-                    segLength += len;
-                    curPos += len;
-                }
-
-                long lastOffset = lastPos % 0x1000;
-                long curOffset = curPos % 0x1000;
-                if (lastOffset >= curOffset && curOffset != 0)
-                {
-                    Console.WriteLine("[ERROR] Ogg page ends in next block at 0x" + curPos.ToString("X8"));
-                    break;
-                }
-
-                if (lastPos >= 0x2000 && curPos < file.Length)
-                {
-                    if(lastGranule > granule)
+                    if (oggPageBuf[0] != 'O' || oggPageBuf[1] != 'g' || oggPageBuf[2] != 'g')
                     {
-                        Console.WriteLine("[ERROR] granule at 0x" + curPos.ToString("X8") + " is lower than last.");
+                        TonieLog.Log("[ERROR] Not an Ogg page header at 0x" + curPos.ToString("X8"));
                         break;
                     }
-                    ulong granuleDelta = granule - lastGranule;
 
-                    minSegs = Math.Min(minSegs, segmentsCount);
-                    maxSegs = Math.Max(maxSegs, segmentsCount);
-                    minGranule = Math.Min(minGranule, granuleDelta);
-                    maxGranule = Math.Max(maxGranule, granuleDelta);
+                    ulong granule = BitConverter.ToUInt64(oggPageBuf, 6);
+                    uint pageNum = BitConverter.ToUInt32(oggPageBuf, 0x12);
+                    byte segmentsCount = oggPageBuf[26];
+                    byte[] segmentLengths = new byte[segmentsCount];
+
+                    if (!PageGranuleMap.ContainsKey(pageNum))
+                    {
+                        PageGranuleMap.Add(pageNum, granule);
+                    }
+
+                    file.Read(segmentLengths, 0, segmentLengths.Length);
+
+                    curPos += 27;
+                    curPos += segmentLengths.Length;
+
+                    foreach (var len in segmentLengths)
+                    {
+                        totalSegments++;
+                        segLength += len;
+                        curPos += len;
+                    }
+
+                    long lastOffset = lastPos % 0x1000;
+                    long curOffset = curPos % 0x1000;
+                    if (lastOffset >= curOffset && curOffset != 0)
+                    {
+                        TonieLog.Log("[ERROR] Ogg page ends in next block at 0x" + curPos.ToString("X8"));
+                        break;
+                    }
+
+                    if (lastPos >= 0x2000 && curPos < file.Length)
+                    {
+                        if(lastGranule > granule)
+                        {
+                            TonieLog.Log("[ERROR] granule at 0x" + curPos.ToString("X8") + " is lower than last.");
+                            break;
+                        }
+                        ulong granuleDelta = granule - lastGranule;
+
+                        minSegs = Math.Min(minSegs, segmentsCount);
+                        maxSegs = Math.Max(maxSegs, segmentsCount);
+                        minGranule = Math.Min(minGranule, granuleDelta);
+                        maxGranule = Math.Max(maxGranule, granuleDelta);
+                    }
+
+                    highestGranule = Math.Max(highestGranule, granule);
+                    lastGranule = granule;
                 }
-
-                highestGranule = Math.Max(highestGranule, granule);
-                lastGranule = granule;
             }
-            file.Close();
         }
 
         public ulong[] ParsePositions()
         {
             List<ulong> positions = new List<ulong>();
-            var file = File.Open(Filename, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
 
-            int curChapter = 0;
-            long curPos = 0x1000;
-            positions.Add(0);
-
-            while (file.Position < file.Length)
+            using (var file = File.Open(Filename, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                byte[] buf = new byte[0x16];
+                int curChapter = 0;
+                long curPos = 0x1000;
+                positions.Add(0);
 
-                file.Seek(curPos, SeekOrigin.Begin);
-                file.Read(buf, 0, buf.Length);
-
-                if (buf[0] != 'O' || buf[1] != 'g' || buf[2] != 'g')
+                while (file.Position < file.Length)
                 {
-                    break;
+                    byte[] buf = new byte[0x16];
+
+                    file.Seek(curPos, SeekOrigin.Begin);
+                    file.Read(buf, 0, buf.Length);
+
+                    if (buf[0] != 'O' || buf[1] != 'g' || buf[2] != 'g')
+                    {
+                        break;
+                    }
+
+                    ulong granule = BitConverter.ToUInt64(buf, 6);
+                    uint pageNum = BitConverter.ToUInt32(buf, 0x12);
+
+                    if (Header.AudioChapters.Length > curChapter && pageNum >= Header.AudioChapters[curChapter])
+                    {
+                        positions.Add(granule);
+                        curChapter++;
+                    }
+
+                    if (file.Position == file.Length)
+                    {
+                        positions.Add(granule);
+                        break;
+                    }
+
+                    curPos += 0x1000;
                 }
-
-                ulong granule = BitConverter.ToUInt64(buf, 6);
-                uint pageNum = BitConverter.ToUInt32(buf, 0x12);
-
-                if (Header.AudioChapters.Length > curChapter && pageNum >= Header.AudioChapters[curChapter])
-                {
-                    positions.Add(granule);
-                    curChapter++;
-                }
-
-                if (file.Position == file.Length)
-                {
-                    positions.Add(granule);
-                    break;
-                }
-
-                curPos += 0x1000;
             }
 
-            file.Close();
             return positions.ToArray();
         }
 
@@ -258,10 +262,13 @@ namespace TonieFile
                 DisplayName = new FileInfo(sourceFile).Name;
                 try
                 {
-                    var tag = new Mp3(sourceFile, Mp3Permissions.Read).GetAllTags().FirstOrDefault();
-                    if (tag != null && tag.Title.IsAssigned)
+                    using (var mp3 = new Mp3(sourceFile, Mp3Permissions.Read))
                     {
-                        DisplayName = tag.Title.Value;
+                        var tag = mp3.GetAllTags().FirstOrDefault();
+                        if (tag != null && tag.Title.IsAssigned)
+                        {
+                            DisplayName = tag.Title.Value;
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -327,7 +334,13 @@ namespace TonieFile
 
                     try
                     {
-                        var fileTuples = filesInDir.Select(f => new Tuple<string, Id3Tag>(f, new Mp3(f, Mp3Permissions.Read).GetAllTags().FirstOrDefault()));
+                        var fileTuples = filesInDir.Select(f =>
+                        {
+                            using (var mp3 = new Mp3(f, Mp3Permissions.Read))
+                            {
+                                return new Tuple<string, Id3Tag>(f, mp3.GetAllTags().FirstOrDefault());
+                            }
+                        });
 
                         sourceFiles = fileTuples.Where(t => t.Item2 != null).OrderBy(m => m.Item2.Track.Value).Select(t => t.Item1).ToArray();
 
@@ -344,12 +357,12 @@ namespace TonieFile
 
                     if (failed)
                     {
-                        Console.WriteLine("[INFO] Tried to sort using MP3 tag for track number, but not all files in");
-                        Console.WriteLine("[INFO] this folder have valid ID3 tags. ");
-                        Console.WriteLine("[INFO] Please make sure all files have correct ID3 fields to have them sorted correctly.");
-                        Console.WriteLine("[INFO] ");
-                        Console.WriteLine("[INFO] Sorting files by their filename.");
-                        Console.WriteLine("");
+                        TonieLog.Log("[INFO] Tried to sort using MP3 tag for track number, but not all files in");
+                        TonieLog.Log("[INFO] this folder have valid ID3 tags. ");
+                        TonieLog.Log("[INFO] Please make sure all files have correct ID3 fields to have them sorted correctly.");
+                        TonieLog.Log("[INFO] ");
+                        TonieLog.Log("[INFO] Sorting files by their filename.");
+                        TonieLog.Log("");
                     }
 
                     FileList.AddRange(sourceFiles);
@@ -372,26 +385,28 @@ namespace TonieFile
         public void ReadFile(string fileName, bool readAudio = true)
         {
             Filename = fileName;
-            var file = File.Open(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            if (file.Length < 0x2000)
+
+            using (var file = File.Open(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                throw new InvalidDataException();
+                if (file.Length < 0x2000)
+                {
+                    throw new InvalidDataException();
+                }
+
+                long len = file.Length;
+                if (!readAudio)
+                {
+                    len = 4096;
+                }
+                byte[] buffer = new byte[len];
+
+                if (file.Read(buffer, 0, buffer.Length) != buffer.Length)
+                {
+                    throw new InvalidDataException();
+                }
+                FileContent = buffer;
             }
 
-            long len = file.Length;
-            if (!readAudio)
-            {
-                len = 4096;
-            }
-            byte[] buffer = new byte[len];
-
-            if (file.Read(buffer, 0, buffer.Length) != buffer.Length)
-            {
-                throw new InvalidDataException();
-            }
-            FileContent = buffer;
-
-            file.Close();
             ParseBuffer();
             CalculateStatistics(out _, out _, out _, out _, out _, out _, out _);
         }
@@ -429,13 +444,46 @@ namespace TonieFile
             Array.Copy(data, 0, FileContent, 4, data.Length);
         }
 
+        /* open a source file as a WaveStream using managed decoders only, so encoding works on all platforms */
+        private static WaveStream OpenSourceStream(string sourceFile)
+        {
+            string type = sourceFile.Split('.').Last().ToLower();
+
+            switch (type)
+            {
+                case "mp3":
+                    return new Mp3FileReaderBase(sourceFile, wf => new Mp3FrameDecompressor(wf));
+
+                case "ogg":
+                    /* the Tonie target format is fixed; Opus decoders deliver any stream at the requested rate/channels */
+                    return new OpusWaveStream(File.Open(sourceFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite), 48000, 2);
+
+                default:
+                    return null;
+            }
+        }
+
+        private static ISampleProvider BuildSampleChain(WaveStream stream)
+        {
+            ISampleProvider samples = stream.ToSampleProvider();
+
+            if (samples.WaveFormat.SampleRate != 48000)
+            {
+                samples = new WdlResamplingSampleProvider(samples, 48000);
+            }
+            if (samples.WaveFormat.Channels == 1)
+            {
+                samples = new MonoToStereoSampleProvider(samples);
+            }
+
+            return samples;
+        }
+
         private void GenerateAudio(List<string> sourceFiles, uint audioId, int bitRate, bool useVbr, string prefixLocation = null, EncodeCallback cbr = null)
         {
             int channels = 2;
             int samplingRate = 48000;
             List<uint> chapters = new List<uint>();
-
-            var outFormat = new WaveFormat(samplingRate, 2);
 
             if(cbr == null)
             {
@@ -453,205 +501,180 @@ namespace TonieFile
 
             string tempName = Path.GetTempFileName();
 
-            using (Stream outputData = new FileStream(tempName, FileMode.OpenOrCreate))
+            try
             {
-                byte[] buffer = new byte[2880 * channels * 2];
-                OpusTags tags = new OpusTags();
-                tags.Comment = "Lavf56.40.101";
-                tags.Fields["encoder"] = "opusenc from opus-tools 0.1.9";
-                tags.Fields["encoder_options"] = "--quiet --bitrate 96 --vbr";
-                tags.Fields["pad"] = new string('0', 0x138);
-
-                OpusOggWriteStream oggOut = new OpusOggWriteStream(encoder, outputData, tags, samplingRate, (int)audioId);
-
-                uint lastIndex = 0;
-                int track = 0;
-                bool warned = false;
-                long maxSize = 0x77359400;
-
-                foreach (var sourceFile in sourceFiles)
+                using (Stream outputData = new FileStream(tempName, FileMode.OpenOrCreate))
                 {
-                    if ((outputData.Length + 0x1000) >= maxSize)
+                    /* 60 ms blocks at 48 kHz stereo */
+                    float[] buffer = new float[2880 * channels];
+                    OpusTags tags = new OpusTags();
+                    tags.Comment = "Lavf56.40.101";
+                    tags.Fields["encoder"] = "opusenc from opus-tools 0.1.9";
+                    tags.Fields["encoder_options"] = "--quiet --bitrate 96 --vbr";
+                    tags.Fields["pad"] = new string('0', 0x138);
+
+                    OpusOggWriteStream oggOut = new OpusOggWriteStream(encoder, outputData, tags, samplingRate, (int)audioId);
+
+                    uint lastIndex = 0;
+                    int track = 0;
+                    bool warned = false;
+                    long maxSize = 0x77359400;
+
+                    foreach (var sourceFile in sourceFiles)
                     {
-                        cbr.Warning("Close to 2 GiB, stopping");
-                        break;
-                    }
-
-                    try
-                    {
-                        int bytesReturned = 1;
-                        int totalBytesRead = 0;
-
-                        track++;
-                        chapters.Add(lastIndex);
-
-                        int lastPct = 0;
-                        cbr.FileStart(track, sourceFile);
-
-
-                        /* prepend a audio file for e.g. chapter number */
-                        if (prefixLocation != null)
+                        if ((outputData.Length + 0x1000) >= maxSize)
                         {
-                            string prefixFile = Path.Combine(prefixLocation, track.ToString("0000") + ".mp3");
+                            cbr.Warning("Close to 2 GiB, stopping");
+                            break;
+                        }
 
-                            if (!File.Exists(prefixFile))
+                        try
+                        {
+                            int samplesReturned = 1;
+
+                            track++;
+                            chapters.Add(lastIndex);
+
+                            int lastPct = 0;
+                            cbr.FileStart(track, sourceFile);
+
+
+                            /* prepend a audio file for e.g. chapter number */
+                            if (prefixLocation != null)
                             {
-                                throw new FileNotFoundException("Missing prefix file '" + prefixFile + "'");
+                                string prefixFile = Path.Combine(prefixLocation, track.ToString("0000") + ".mp3");
+
+                                if (!File.Exists(prefixFile))
+                                {
+                                    throw new FileNotFoundException("Missing prefix file '" + prefixFile + "'");
+                                }
+
+                                try
+                                {
+                                    using (var prefixStream = OpenSourceStream(prefixFile))
+                                    {
+                                        ISampleProvider prefixSamples = BuildSampleChain(prefixStream);
+
+                                        while (true)
+                                        {
+                                            samplesReturned = prefixSamples.Read(buffer, 0, buffer.Length);
+
+                                            if (samplesReturned <= 0)
+                                            {
+                                                break;
+                                            }
+
+                                            if (!IsSilent(buffer, samplesReturned))
+                                            {
+                                                if ((outputData.Length + 0x1000 + samplesReturned) >= maxSize)
+                                                {
+                                                    break;
+                                                }
+                                                oggOut.WriteSamples(buffer, 0, samplesReturned);
+                                            }
+                                            lastIndex = (uint)oggOut.PageCounter;
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    throw new Exception("Failed processing prefix file '" + prefixFile + "'", ex);
+                                }
                             }
 
-                            try
+                            /* then the real audio file */
+                            using (WaveStream stream = OpenSourceStream(sourceFile))
                             {
-                                var prefixStream = new Mp3FileReader(prefixFile);
-                                var prefixResampled = new MediaFoundationResampler(prefixStream, outFormat);
+                                if (stream == null)
+                                {
+                                    cbr.FileFailed("Unknown file type");
+                                    continue;
+                                }
+
+                                ISampleProvider streamSamples = BuildSampleChain(stream);
 
                                 while (true)
                                 {
-                                    bytesReturned = prefixResampled.Read(buffer, 0, buffer.Length);
+                                    samplesReturned = streamSamples.Read(buffer, 0, buffer.Length);
 
-                                    if (bytesReturned <= 0)
+                                    if (samplesReturned <= 0)
                                     {
                                         break;
                                     }
 
-                                    bool isEmpty = (buffer.Where(v => v != 0).Count() == 0);
-                                    if (!isEmpty)
-                                    {
-                                        float[] sampleBuffer = ConvertToFloat(buffer, bytesReturned, channels);
+                                    decimal progress = (decimal)stream.Position / stream.Length;
 
-                                        if ((outputData.Length + 0x1000 + sampleBuffer.Length) >= maxSize)
-                                        {
-                                            break;
-                                        }
-                                        oggOut.WriteSamples(sampleBuffer, 0, sampleBuffer.Length);
+                                    if ((int)(progress * 20) != lastPct)
+                                    {
+                                        lastPct = (int)(progress * 20);
+                                        cbr.Progress(progress);
+                                    }
+
+                                    if (!IsSilent(buffer, samplesReturned))
+                                    {
+                                        oggOut.WriteSamples(buffer, 0, samplesReturned);
                                     }
                                     lastIndex = (uint)oggOut.PageCounter;
                                 }
                             }
-                            catch (Exception ex)
-                            {
-                                throw new Exception("Failed processing prefix file '" + prefixFile + "'");
-                            }
+
+                            cbr.FileDone();
                         }
-
-                        /* then the real audio file */
-                        string type = sourceFile.Split('.').Last().ToLower();
-                        WaveStream stream = null;
-
-                        switch (type)
+                        catch (OpusOggWriteStream.PaddingException e)
                         {
-                            case "mp3":
-                                stream = new Mp3FileReader(sourceFile);
-                                break;
-
-                            case "ogg":
-                                stream = new OpusWaveStream(File.Open(sourceFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite), bitRate, channels);
-                                break;
+                            string msg = "Failed to pad opus data properly. Please try CBR with bitrates a multiple of 24 kbps";
+                            cbr.Failed(msg);
+                            throw new EncodingException(msg);
                         }
-
-                        if(stream == null)
+                        catch (FileNotFoundException e)
                         {
-                            cbr.FileFailed("Unknown file type");
-                            continue;
+                            cbr.Failed(e.Message);
+                            throw;
                         }
-
-                        var streamResampled = new MediaFoundationResampler(stream, outFormat);
-
-                        while (true)
+                        catch (Exception e)
                         {
-                            bytesReturned = streamResampled.Read(buffer, 0, buffer.Length);
-
-                            if (bytesReturned <= 0)
-                            {
-                                break;
-                            }
-                            totalBytesRead += bytesReturned;
-
-                            decimal progress = (decimal)stream.Position / stream.Length;
-
-                            if ((int)(progress * 20) != lastPct)
-                            {
-                                lastPct = (int)(progress * 20);
-                                cbr.Progress(progress);
-                            }
-
-                            bool isEmpty = (buffer.Where(v => v != 0).Count() == 0);
-                            if (!isEmpty)
-                            {
-                                float[] sampleBuffer = ConvertToFloat(buffer, bytesReturned, channels);
-
-                                oggOut.WriteSamples(sampleBuffer, 0, sampleBuffer.Length);
-                            }
-                            lastIndex = (uint)oggOut.PageCounter;
+                            string msg = "Failed processing " + sourceFile;
+                            cbr.Failed(msg);
+                            throw new Exception(msg, e);
                         }
-                        stream.Close();
 
-                        cbr.FileDone();
-                    }
-                    catch (OpusOggWriteStream.PaddingException e)
-                    {
-                        string msg = "Failed to pad opus data properly. Please try CBR with bitrates a multiple of 24 kbps";
-                        cbr.Failed(msg);
-                        throw new EncodingException(msg);
-                    }
-                    catch (FileNotFoundException e)
-                    {
-                        cbr.Failed(e.Message);
-                        throw new FileNotFoundException(e.Message);
-                    }
-                    catch (InvalidDataException e)
-                    {
-                        string msg = "Failed processing " + sourceFile;
-                        cbr.Failed(msg);
-                        throw new Exception(msg);
-                    }
-                    catch (Exception e)
-                    {
-                        string msg = "Failed processing " + sourceFile;
-                        cbr.Failed(msg);
-                        throw new Exception(msg);
+                        if (!warned && outputData.Length >= maxSize / 2)
+                        {
+                            cbr.Warning("Approaching 2 GiB, please reduce the bitrate");
+                            warned = true;
+                        }
                     }
 
-                    if (!warned && outputData.Length >= maxSize / 2)
-                    {
-                        cbr.Warning("Approaching 2 GiB, please reduce the bitrate");
-                        warned = true;
-                    }
+                    oggOut.Finish();
+                    Header.AudioId = (uint) oggOut.LogicalStreamId;
                 }
 
-                oggOut.Finish();
-                Header.AudioId = (uint) oggOut.LogicalStreamId;
+                Audio = File.ReadAllBytes(tempName);
+            }
+            finally
+            {
+                File.Delete(tempName);
             }
 
-            Audio = File.ReadAllBytes(tempName);
-
-            var prov = new SHA1CryptoServiceProvider();
-            Header.Hash = prov.ComputeHash(Audio);
+            using (var prov = SHA1.Create())
+            {
+                Header.Hash = prov.ComputeHash(Audio);
+            }
             Header.AudioChapters = chapters.ToArray();
             Header.AudioLength = Audio.Length;
             Header.Padding = new byte[0];
-
-            File.Delete(tempName);
         }
 
-        private static float ShortToSample(short pcmValue)
+        private static bool IsSilent(float[] buffer, int samples)
         {
-            return pcmValue / 32768f;
-        }
-
-        private float[] ConvertToFloat(byte[] pcmBuffer, int bytes, int channels)
-        {
-            int bytesPerSample = 2 * channels;
-            float[] samples = new float[channels * (pcmBuffer.Length / bytesPerSample)];
-
-            for (int sample = 0; sample < bytes / bytesPerSample; sample++)
+            for (int pos = 0; pos < samples; pos++)
             {
-                for (int chan = 0; chan < channels; chan++)
+                if (buffer[pos] != 0)
                 {
-                    samples[channels * sample + chan] = ShortToSample((short)(pcmBuffer[bytesPerSample * sample + 1 + chan * 2] << 8 | pcmBuffer[bytesPerSample * sample + 0 + chan * 2]));
+                    return false;
                 }
             }
-
-            return samples;
+            return true;
         }
 
         private void ParseBuffer()
@@ -673,8 +696,11 @@ namespace TonieFile
             var coder = new ProtoCoder();
             FileHeader header = coder.Deserialize<FileHeader>(protoBuf);
 
-            var prov = new SHA1CryptoServiceProvider();
-            var hash = prov.ComputeHash(payload);
+            byte[] hash;
+            using (var prov = SHA1.Create())
+            {
+                hash = prov.ComputeHash(payload);
+            }
 
             HashCorrect = true;
             if (!hash.SequenceEqual(header.Hash))
@@ -860,7 +886,8 @@ namespace TonieFile
                 {
                     int trackNum = chapter + 1;
                     string fileName = Path.Combine(outDirectory, outFileName + " - Track #" + trackNum.ToString("00") + ".ogg");
-                    FileStream outFile = File.Open(fileName, FileMode.Create, FileAccess.Write);
+                    using (FileStream outFile = File.Open(fileName, FileMode.Create, FileAccess.Write))
+                    {
                     OggPage[] metaPagesTrack = metaPages.Select(p => new OggPage(p)).ToArray();
 
                     if (titles != null && chapter < titles.Length)
@@ -920,8 +947,7 @@ namespace TonieFile
                             page.Write(outFile);
                         }
                     }
-
-                    outFile.Close();
+                    }
                 }
             }
         }

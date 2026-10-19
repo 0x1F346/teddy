@@ -35,6 +35,15 @@ namespace TonieFile
             OpusDecoder = new OpusOggReadStream(Concentus.Structs.OpusDecoder.Create(Rate, Channels), stream);
         }
 
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                BaseStream.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
         public void SeekTo(TimeSpan newPos)
         {
             lock (OpusDecoder)
