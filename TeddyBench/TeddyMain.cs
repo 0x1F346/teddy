@@ -1933,8 +1933,13 @@ namespace TeddyBench
                         }
                     }));
                 }
+                catch (ThreadAbortException)
+                {
+                }
                 catch (Exception ex)
                 {
+                    LogWindow.Log(LogWindow.eLogLevel.Error, "Reading tag memory failed: " + ex.ToString());
+                    BeginInvoke(new Action(() => MessageBox.Show("Reader operation failed: " + ex.Message, "Failed")));
                 }
                 AsyncTagActionThread = null;
             }, "AsyncTagActionThread");
@@ -1950,7 +1955,9 @@ namespace TeddyBench
                     Thread.Sleep(100);
                     if (opDlg.DialogResult == DialogResult.Cancel)
                     {
-                        AsyncTagActionThread.Abort();
+                        /* snapshot - the worker nulls the field when it finishes on its own */
+                        SafeThread thread = AsyncTagActionThread;
+                        thread?.Abort();
                         AsyncTagActionThread = null;
                     }
                 }
@@ -2082,8 +2089,13 @@ namespace TeddyBench
                         }
                     }));
                 }
+                catch (ThreadAbortException)
+                {
+                }
                 catch (Exception ex)
                 {
+                    LogWindow.Log(LogWindow.eLogLevel.Error, "Reading tag memory failed: " + ex.ToString());
+                    BeginInvoke(new Action(() => MessageBox.Show("Reader operation failed: " + ex.Message, "Failed")));
                 }
                 AsyncTagActionThread = null;
             }, "AsyncTagActionThread");
@@ -2099,7 +2111,9 @@ namespace TeddyBench
                     Thread.Sleep(100);
                     if (opDlg.DialogResult == DialogResult.Cancel)
                     {
-                        AsyncTagActionThread.Abort();
+                        /* snapshot - the worker nulls the field when it finishes on its own */
+                        SafeThread thread = AsyncTagActionThread;
+                        thread?.Abort();
                         AsyncTagActionThread = null;
                     }
                 }
@@ -2142,8 +2156,13 @@ namespace TeddyBench
                         {
                             RfidReader.EmulateTag(data);
                         }
+                        catch (ThreadAbortException)
+                        {
+                        }
                         catch (Exception ex)
                         {
+                            LogWindow.Log(LogWindow.eLogLevel.Error, "Emulating tag failed: " + ex.ToString());
+                            BeginInvoke(new Action(() => MessageBox.Show("Reader operation failed: " + ex.Message, "Failed")));
                         }
                         AsyncTagActionThread = null;
                     }, "AsyncTagActionThread");
@@ -2163,7 +2182,9 @@ namespace TeddyBench
                     Thread.Sleep(100);
                     if (opDlg.DialogResult == DialogResult.Cancel)
                     {
-                        AsyncTagActionThread.Abort();
+                        /* snapshot - the worker nulls the field when it finishes on its own */
+                        SafeThread thread = AsyncTagActionThread;
+                        thread?.Abort();
                         AsyncTagActionThread = null;
                     }
                 }

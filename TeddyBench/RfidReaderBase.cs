@@ -121,6 +121,7 @@ namespace TeddyBench
                     }
                     catch (Exception ex)
                     {
+                        LogWindow.Log(LogWindow.eLogLevel.DebugVerbose, "Flushing port on close failed: " + ex.Message);
                     }
 
                     try
@@ -129,6 +130,7 @@ namespace TeddyBench
                     }
                     catch (Exception ex)
                     {
+                        LogWindow.Log(LogWindow.eLogLevel.DebugVerbose, "Closing port failed: " + ex.Message);
                     }
                     Port.Dispose();
                     Port = null;

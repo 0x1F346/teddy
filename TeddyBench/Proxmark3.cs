@@ -1018,6 +1018,8 @@ namespace TeddyBench
                 }
                 catch (Exception e0)
                 {
+                    /* expected for ports that are stale or in use */
+                    LogWindow.Log(LogWindow.eLogLevel.DebugVerbose, "[PM3] Port " + listedPort + " not usable: " + e0.Message);
                 }
             }
 
@@ -1477,25 +1479,21 @@ namespace TeddyBench
             {
                 return null;
             }
-            byte[] ret = null;
 
+            /* the scan thread must come back up even when the operation throws,
+               otherwise one failure stops tag scanning for good */
             StopThread();
             try
             {
                 lock (ReaderLock)
                 {
-                    ret = ReadMemoryInternal();
+                    return ReadMemoryInternal();
                 }
             }
-            catch (ThreadAbortException ex)
+            finally
             {
                 StartThread();
-                throw ex;
             }
-
-            StartThread();
-
-            return ret;
         }
 
         internal override void EmulateTag(byte[] data)
@@ -1506,11 +1504,17 @@ namespace TeddyBench
             }
 
             StopThread();
-            lock (ReaderLock)
+            try
             {
-                EmulateTagInternal(data);
+                lock (ReaderLock)
+                {
+                    EmulateTagInternal(data);
+                }
             }
-            StartThread();
+            finally
+            {
+                StartThread();
+            }
         }
 
         internal override MeasurementResult MeasureAntenna(eMeasurementType type = eMeasurementType.Both)
@@ -1521,14 +1525,22 @@ namespace TeddyBench
                 return null;
             }
 
-            StopThread();
-            lock (ReaderLock)
-            {
-                MeasureAntennaInternal(result, type);
-            }
-            StartThread();
+            bool success;
 
-            return result;
+            StopThread();
+            try
+            {
+                lock (ReaderLock)
+                {
+                    success = MeasureAntennaInternal(result, type);
+                }
+            }
+            finally
+            {
+                StartThread();
+            }
+
+            return success ? result : null;
         }
 
         internal float GetHFVoltage()
@@ -1567,8 +1579,9 @@ namespace TeddyBench
                     }
                     catch (Exception ex)
                     {
+                        LogWindow.Log(LogWindow.eLogLevel.Debug, "[PM3] Console mode failed: " + ex.Message);
                     }
-                }
+    }
             }, "ConsoleThread");
             ConsoleThread.Start();
             return;

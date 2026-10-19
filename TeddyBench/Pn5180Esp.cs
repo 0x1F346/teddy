@@ -151,9 +151,11 @@ namespace TeddyBench
                 return false;
             }
 
+            /* the ESP firmware's unlock command takes no password; log which one was requested */
+            LogWindow.Log(LogWindow.eLogLevel.Debug, "[Pn5180Esp] UnlockTag: requested with password 0x" + pass.ToString("X8"));
             Port.WriteLine("u");
             String response = Port.ReadLine();
-            response.Replace("\r", "");
+            response = response.Replace("\r", "");
 
             if (response == "ok")
             {
@@ -207,6 +209,8 @@ namespace TeddyBench
                 }
                 catch (Exception e0)
                 {
+                    /* expected for ports that are stale or in use */
+                    LogWindow.Log(LogWindow.eLogLevel.DebugVerbose, "[Pn5180Esp] Port " + listedPort + " not usable: " + e0.Message);
                 }
             }
 
@@ -271,7 +275,7 @@ namespace TeddyBench
                 /* read version */
                 p.WriteLine("v");
                 String response = p.ReadLine();
-                response.Replace("\r", "");
+                response = response.Replace("\r", "");
 
                 if(!response.Contains("Pn5180Esp"))
                 {
@@ -290,6 +294,7 @@ namespace TeddyBench
             }
             catch (Exception ex)
             {
+                LogWindow.Log(LogWindow.eLogLevel.DebugVerbose, "[Pn5180Esp] TryOpen: " + port + " failed: " + ex.Message);
                 try
                 {
                     if (p != null && p.IsOpen)
@@ -299,6 +304,7 @@ namespace TeddyBench
                 }
                 catch (Exception e)
                 {
+                    LogWindow.Log(LogWindow.eLogLevel.DebugVerbose, "[Pn5180Esp] TryOpen: closing " + port + " failed: " + e.Message);
                 }
             }
 
