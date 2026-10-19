@@ -222,7 +222,7 @@ namespace TonieFile
                                     objField.SetValue(obj, (UInt64)value);
                                     break;
                                 default:
-                                    Console.WriteLine("Unexpected type '" + objFieldType.Name + "'");
+                                    TonieLog.Log("Unexpected type '" + objFieldType.Name + "'");
                                     break;
                             }
                             break;
@@ -295,7 +295,7 @@ namespace TonieFile
                                         break;
                                     }
                                 default:
-                                    Console.WriteLine("Unexpected type '" + objFieldType.Name + "'");
+                                    TonieLog.Log("Unexpected type '" + objFieldType.Name + "'");
                                     break;
 
                             }
@@ -405,7 +405,7 @@ namespace TonieFile
                             AddVariantField(field, (UInt64)objField.GetValue(obj));
                             break;
                         default:
-                            Console.WriteLine("Unexpected type '" + objFieldType.Name + "'");
+                            TonieLog.Log("Unexpected type '" + objFieldType.Name + "'");
                             break;
                     }
                 }
