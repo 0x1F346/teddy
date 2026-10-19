@@ -1955,7 +1955,9 @@ namespace TeddyBench
                     Thread.Sleep(100);
                     if (opDlg.DialogResult == DialogResult.Cancel)
                     {
-                        AsyncTagActionThread.Abort();
+                        /* snapshot - the worker nulls the field when it finishes on its own */
+                        SafeThread thread = AsyncTagActionThread;
+                        thread?.Abort();
                         AsyncTagActionThread = null;
                     }
                 }
@@ -2109,7 +2111,9 @@ namespace TeddyBench
                     Thread.Sleep(100);
                     if (opDlg.DialogResult == DialogResult.Cancel)
                     {
-                        AsyncTagActionThread.Abort();
+                        /* snapshot - the worker nulls the field when it finishes on its own */
+                        SafeThread thread = AsyncTagActionThread;
+                        thread?.Abort();
                         AsyncTagActionThread = null;
                     }
                 }
@@ -2178,7 +2182,9 @@ namespace TeddyBench
                     Thread.Sleep(100);
                     if (opDlg.DialogResult == DialogResult.Cancel)
                     {
-                        AsyncTagActionThread.Abort();
+                        /* snapshot - the worker nulls the field when it finishes on its own */
+                        SafeThread thread = AsyncTagActionThread;
+                        thread?.Abort();
                         AsyncTagActionThread = null;
                     }
                 }
