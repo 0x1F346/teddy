@@ -197,7 +197,7 @@ namespace TonieFile
 
                             switch (objFieldType.Name)
                             {
-                                case "Bool":
+                                case "Boolean":
                                     objField.SetValue(obj, value != 0);
                                     break;
                                 case "Byte":
@@ -241,6 +241,9 @@ namespace TonieFile
                                         objField.SetValue(obj, data);
                                         break;
                                     }
+                                case "Int16[]":
+                                case "Int32[]":
+                                case "Int64[]":
                                 case "UInt16[]":
                                 case "UInt32[]":
                                 case "UInt64[]":
@@ -301,7 +304,22 @@ namespace TonieFile
                             }
                             break;
                         }
+                    case eFieldType.Fixed64:
+                        {
+                            /* none of our structures use fixed fields - consume them to keep the parser in sync */
+                            GetBytes(new byte[8]);
+                            TonieLog.Log("Skipping fixed64 field " + field);
+                            break;
+                        }
+                    case eFieldType.Fixed32:
+                        {
+                            GetBytes(new byte[4]);
+                            TonieLog.Log("Skipping fixed32 field " + field);
+                            break;
+                        }
                 }
+
+                lastField = field;
             }
         }
 
@@ -317,7 +335,7 @@ namespace TonieFile
             return obj;
         }
 
-        internal byte[] Serialize<T>(T obj) where T : class
+        public byte[] Serialize<T>(T obj) where T : class
         {
             Payload.Clear();
             AddObject(obj);

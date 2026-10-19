@@ -57,10 +57,11 @@ namespace Teddy
                 if (path.StartsWith("http"))
                 {
                     HttpWebRequest request = (HttpWebRequest)WebRequest.Create(path);
-                    HttpWebResponse response = (HttpWebResponse)request.GetResponse();
-                    TextReader reader = new StreamReader(response.GetResponseStream());
-
-                    TonieInfos = JsonConvert.DeserializeObject<TonieTools.TonieData[]>(reader.ReadToEnd());
+                    using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                    using (TextReader reader = new StreamReader(response.GetResponseStream()))
+                    {
+                        TonieInfos = JsonConvert.DeserializeObject<TonieTools.TonieData[]>(reader.ReadToEnd());
+                    }
                 }
                 else if (File.Exists(path))
                 {
@@ -75,17 +76,18 @@ namespace Teddy
             }
         }
 
-        public static void SaveJson(string path)
+        public static bool SaveJson(string path)
         {
             try
             {
                 File.WriteAllText(path, JsonConvert.SerializeObject(TonieInfos, Formatting.Indented));
+                return true;
             }
             catch (Exception e)
             {
-                Console.WriteLine("Failed to load JSON:");
+                Console.WriteLine("Failed to save JSON:");
                 Console.WriteLine(e.Message);
-                return;
+                return false;
             }
         }
 
@@ -156,8 +158,9 @@ namespace Teddy
             }
         }
 
-        static void Main(string[] args)
+        static int Main(string[] args)
         {
+            int errors = 0;
             bool showLicense = false;
             bool showHelp = false;
             TonieTools.eDumpFormat dumpFormat = TonieTools.eDumpFormat.FormatText;
@@ -202,19 +205,19 @@ namespace Teddy
                 Console.Write("teddy: ");
                 Console.WriteLine(e.Message);
                 Console.WriteLine("Try `teddy --help' for more information.");
-                return;
+                return 1;
             }
 
             if (showLicense)
             {
                 ShowLicense(p);
-                return;
+                return 0;
             }
 
             if (showHelp)
             {
                 ShowHelp(p);
-                return;
+                return 0;
             }
 
             LoadJson(jsonFile);
@@ -223,17 +226,17 @@ namespace Teddy
             {
                 default:
                     ShowHelp(p);
-                    return;
+                    return 1;
 
                 case "rename":
                     {
                         Dictionary<string, string> renameList = new Dictionary<string, string>();
                         List<string> files = new List<string>();
 
-                        if (extra.Count < 2 || (!Directory.Exists(extra[0]) && !Directory.Exists(extra[1])))
+                        if (extra.Count < 2 || !Directory.Exists(extra[0]) || !Directory.Exists(extra[1]))
                         {
                             Console.WriteLine("Error: You must specify a source and a destination directory");
-                            return;
+                            return 1;
                         }
 
                         FindTonieFiles(files, extra[0]);
@@ -274,10 +277,12 @@ namespace Teddy
                             catch (FileNotFoundException ex)
                             {
                                 Console.WriteLine("File not found: " + file);
+                                errors++;
                             }
                             catch (InvalidDataException ex)
                             {
                                 Console.WriteLine("  '" + file + "' -> (corrupt)");
+                                errors++;
                             }
                             catch (Exception e)
                             {
@@ -286,6 +291,7 @@ namespace Teddy
                                 Console.WriteLine("   Exception:  " + e.GetType());
                                 Console.WriteLine("   Message:    " + e.Message);
                                 Console.WriteLine("   Stacktrace: " + e.StackTrace);
+                                errors++;
                             }
                         }
 
@@ -342,7 +348,8 @@ namespace Teddy
                                 }
                                 catch (Exception e)
                                 {
-                                    Console.WriteLine("[ERROR] Failed to rename '" + key + "'");
+                                    Console.WriteLine("[ERROR] Failed to rename '" + key + "': " + e.Message);
+                                    errors++;
                                 }
                             }
                         }
@@ -358,7 +365,7 @@ namespace Teddy
                         if (extra.Count < 1 || (!Directory.Exists(extra[0]) && !File.Exists(extra[0])))
                         {
                             Console.WriteLine("Error: You must specify a file");
-                            return;
+                            return 1;
                         }
 
                         switch (dumpFormat)
@@ -390,7 +397,7 @@ namespace Teddy
                                 if (!File.Exists(file))
                                 {
                                     Console.WriteLine("Error: file '" + file + "' does not exist");
-                                    return;
+                                    return 1;
                                 }
                                 files.Add(file);
                             }
@@ -403,17 +410,31 @@ namespace Teddy
                             {
                                 StringBuilder message = new StringBuilder();
 
-                                TonieTools.DumpInfo(message, dumpFormat, file, TonieInfos);
+                                if (!TonieTools.DumpInfo(message, dumpFormat, file, TonieInfos))
+                                {
+                                    errors++;
+                                }
 
-                                Console.Write(message.ToString());
+                                if (message.Length > 0)
+                                {
+                                    /* the entries of the JSON array need a separator between them */
+                                    if (!first && dumpFormat == TonieTools.eDumpFormat.FormatJSON)
+                                    {
+                                        Console.WriteLine(",");
+                                    }
+                                    first = false;
+                                    Console.Write(message.ToString());
+                                }
                             }
                             catch (FileNotFoundException ex)
                             {
                                 Console.WriteLine("File not found: " + file);
+                                errors++;
                             }
                             catch (InvalidDataException ex)
                             {
                                 Console.WriteLine("File corrupt: " + file);
+                                errors++;
                             }
                             catch (Exception e)
                             {
@@ -422,11 +443,7 @@ namespace Teddy
                                 Console.WriteLine("   Exception:  " + e.GetType());
                                 Console.WriteLine("   Message:    " + e.Message);
                                 Console.WriteLine("   Stacktrace: " + e.StackTrace);
-                            }
-
-                            if (first)
-                            {
-                                first = false;
+                                errors++;
                             }
                         }
 
@@ -443,7 +460,10 @@ namespace Teddy
 
                         if (writeJson != null)
                         {
-                            SaveJson(writeJson);
+                            if (!SaveJson(writeJson))
+                            {
+                                errors++;
+                            }
                         }
                         break;
                     }
@@ -453,7 +473,7 @@ namespace Teddy
                         if (extra.Count < 1 || (!Directory.Exists(extra[0]) && !File.Exists(extra[0])))
                         {
                             Console.WriteLine("Error: You must specify a file");
-                            return;
+                            return 1;
                         }
 
                         List<string> files = new List<string>();
@@ -469,7 +489,7 @@ namespace Teddy
                                 if (!File.Exists(file))
                                 {
                                     Console.WriteLine("Error: file '" + file + "' does not exist");
-                                    return;
+                                    return 1;
                                 }
                                 files.Add(file);
                             }
@@ -509,7 +529,7 @@ namespace Teddy
                                 if (!Directory.Exists(outDirectory))
                                 {
                                     Console.WriteLine("Error: Output directory '" + outDirectory + "' does not exist");
-                                    return;
+                                    return 1;
                                 }
 
                                 try
@@ -520,15 +540,18 @@ namespace Teddy
                                 {
                                     Console.WriteLine("[ERROR] Failed to write .ogg/.cue'");
                                     Console.WriteLine("   Message:    " + ex.Message);
+                                    errors++;
                                 }
                             }
                             catch (FileNotFoundException ex)
                             {
                                 Console.WriteLine("File not found: " + file);
+                                errors++;
                             }
                             catch (InvalidDataException ex)
                             {
                                 Console.WriteLine("File corrupt: " + file);
+                                errors++;
                             }
                             catch (Exception e)
                             {
@@ -537,6 +560,7 @@ namespace Teddy
                                 Console.WriteLine("   Exception:  " + e.GetType());
                                 Console.WriteLine("   Message:    " + e.Message);
                                 Console.WriteLine("   Stacktrace: " + e.StackTrace);
+                                errors++;
                             }
                         }
                         break;
@@ -548,7 +572,7 @@ namespace Teddy
                     if (extra.Count < 1)
                     {
                         Console.WriteLine("Error: You must specify a directory or files to encode");
-                        return;
+                        return 1;
                     }
                     /*
                     if ((bitRate % 24) != 0)
@@ -565,7 +589,7 @@ namespace Teddy
                             if (!uint.TryParse(audioId.Replace("0x", ""), System.Globalization.NumberStyles.HexNumber, null, out id))
                             {
                                 Console.WriteLine("Error: You must specify the AudioID as hex value like 0x5E034216 or as decimal number like 1577271830");
-                                return;
+                                return 1;
                             }
                         }
                         else
@@ -573,7 +597,7 @@ namespace Teddy
                             if (!uint.TryParse(audioId, System.Globalization.NumberStyles.Integer, null, out id))
                             {
                                 Console.WriteLine("Error: You must specify the AudioID as hex value like 0x5E034216 or as decimal number like 1577271830");
-                                return;
+                                return 1;
                             }
                         }
                     }
@@ -589,7 +613,7 @@ namespace Teddy
                             if (!Directory.Exists(baseDirOutFile))
                             {
                                 Console.WriteLine("Error: Specified output directory '" + outLocationEncode + "' does not exist and file '" + baseDirOutFile + "' not reachable.");
-                                return;
+                                return 1;
                             }
                             outFile = outLocationEncode;
                         }
@@ -602,30 +626,33 @@ namespace Teddy
                         try
                         {
                             File.WriteAllBytes(outFile, generated.FileContent);
+                            Console.WriteLine("");
+                            Console.WriteLine("Written content to " + outFile);
                         }
                         catch (Exception ex)
                         {
                             Console.WriteLine("[ERROR] Failed to write file '" + outFile + "'");
                             Console.WriteLine("   Message:    " + ex.Message);
+                            errors++;
                         }
-
-                        Console.WriteLine("");
-                        Console.WriteLine("Written content to " + outFile);
                     }
                     catch (FileNotFoundException ex)
                     {
                         Console.WriteLine("[ERROR] Failed to process due to a missing file");
                         Console.WriteLine("   Message:    " + ex.Message);
+                        errors++;
                     }
                     catch (InvalidDataException ex)
                     {
                         Console.WriteLine("[ERROR] Failed to process due to an invalid file");
                         Console.WriteLine("   Message:    " + ex.Message);
+                        errors++;
                     }
                     catch (TonieAudio.EncodingException ex)
                     {
                         Console.WriteLine("[ERROR] Failed to encode audio");
                         Console.WriteLine("   Message:    " + ex.Message);
+                        errors++;
                     }
                     catch (Exception e)
                     {
@@ -634,9 +661,12 @@ namespace Teddy
                         Console.WriteLine("   Exception:  " + e.GetType());
                         Console.WriteLine("   Message:    " + e.Message);
                         Console.WriteLine("   Stacktrace: " + e.StackTrace);
+                        errors++;
                     }
                     break;
             }
+
+            return (errors == 0) ? 0 : 1;
         }
 
         private static void ShowLicense(OptionSet p)

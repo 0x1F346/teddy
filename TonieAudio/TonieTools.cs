@@ -99,7 +99,6 @@ namespace TonieFile
                     id += 0x50000000;
                 }
                 var date = DateTimeOffset.FromUnixTimeSeconds(id);
-                bool first = false;
 
                 switch (dumpFormat)
                 {
@@ -150,9 +149,13 @@ namespace TonieFile
                             {
                                 info = found.First();
                                 titles = info.Tracks;
-                                infoIndex = Array.IndexOf(info.AudioIds, dumpFile.Header.AudioId);
-                                Array.Resize(ref info.Hash, info.AudioIds.Length);
-                                infoHashString = info.Hash[infoIndex];
+                                /* the audio ID may be missing from the JSON entry even though the hash matched;
+                                   look up read-only - the shared TonieData objects must not be modified */
+                                infoIndex = Array.IndexOf(info.AudioIds, (long)dumpFile.Header.AudioId);
+                                if (infoIndex >= 0 && infoIndex < info.Hash.Length)
+                                {
+                                    infoHashString = info.Hash[infoIndex];
+                                }
 
                                 message.AppendLine("  Header: JSON Name   '" + info.Title + "'");
                             }
@@ -166,11 +169,6 @@ namespace TonieFile
                             message.AppendLine("  Header: AudioLen    0x" + dumpFile.Header.AudioLength.ToString("X8") + " " + (dumpFile.Header.AudioLength == dumpFile.Audio.Length ? "[OK]" : "[INCORRECT]"));
                             message.AppendLine("  Header: Checksum    " + hashString + " " + (dumpFile.HashCorrect ? "[OK]" : "[INCORRECT]") + " " + (infoHashString != null ? (infoHashString == hashString ? "[JSON MATCH]" : "[JSON MISMATCH]") : "[NO JSON INFO]"));
                             message.AppendLine("  Header: Chapters    ");
-
-                            if (info != null && infoHashString == null)
-                            {
-                                info.Hash[infoIndex] = hashString;
-                            }
 
                             TimeSpan prevTime = new TimeSpan();
                             for (int track = 1; track <= dumpFile.Header.AudioChapters.Length; track++)
@@ -210,10 +208,6 @@ namespace TonieFile
 
                     case eDumpFormat.FormatJSON:
                         {
-                            if (!first)
-                            {
-                                message.AppendLine(",");
-                            }
                             message.AppendLine("  {");
                             message.AppendLine("    \"uid\": \"" + uid + "\",");
                             message.AppendLine("    \"audio_id\": \"" + dumpFile.Header.AudioId.ToString("X8") + "\",");
@@ -225,10 +219,18 @@ namespace TonieFile
                             message.AppendLine("    \"audio_length_check\": \"" + (dumpFile.Header.AudioLength == dumpFile.Audio.Length ? "TRUE" : "FALSE") + "\",");
                             message.AppendLine("    \"audio_hash\": \"" + BitConverter.ToString(dumpFile.Header.Hash).Replace("-", "") + "\",");
                             message.AppendLine("    \"audio_hash_check\": \"" + (dumpFile.HashCorrect ? "TRUE" : "FALSE") + "\",");
-                            message.Append("    \"chapters\": [ 0");
+                            message.Append("    \"chapters\": [");
+                            string chapterSeparator = " ";
+                            /* chapter lists are expected to start at page 0; only add it when missing */
+                            if (dumpFile.Header.AudioChapters.Length == 0 || dumpFile.Header.AudioChapters[0] != 0)
+                            {
+                                message.Append(" 0");
+                                chapterSeparator = ", ";
+                            }
                             foreach (var offset in dumpFile.Header.AudioChapters)
                             {
-                                message.Append(", " + offset);
+                                message.Append(chapterSeparator + offset);
+                                chapterSeparator = ", ";
                             }
                             message.AppendLine(" ],");
                             message.AppendLine("    \"segments\": " + segCount + ",");
@@ -251,7 +253,15 @@ namespace TonieFile
             }
             catch (Exception ex)
             {
-                message.Append("Failed: " + ex.ToString());
+                if (dumpFormat == eDumpFormat.FormatJSON)
+                {
+                    /* emit a valid array entry so the overall output stays parseable */
+                    message.AppendLine("  { \"file\": " + JsonConvert.ToString(file) + ", \"error\": " + JsonConvert.ToString(ex.Message) + " }");
+                }
+                else
+                {
+                    message.Append("Failed: " + ex.ToString());
+                }
                 return false;
             }
         }
