@@ -1,5 +1,4 @@
-﻿using Octokit;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -111,8 +110,9 @@ namespace TeddyBench
 
         public static bool CheckChecksum(byte[] buf, int start = 0)
         {
-            int crcPos = buf.Length - 2 - start;
-            ushort crc = CalcChecksum(buf, start, crcPos);
+            /* the CRC is always in the last two bytes; start only moves the beginning of the checksummed data */
+            int crcPos = buf.Length - 2;
+            ushort crc = CalcChecksum(buf, start, crcPos - start);
 
             if(buf[crcPos + 0] != (byte)(crc & 0xff) ||  buf[crcPos + 1] != (byte)(crc >> 8))
             {
