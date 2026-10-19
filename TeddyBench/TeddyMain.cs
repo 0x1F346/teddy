@@ -30,15 +30,16 @@ namespace TeddyBench
     public partial class TeddyMain : Form
     {
         private SafeThread ScanCardThread = null;
-        private bool ScanCardThreadStop = false;
+        private volatile bool ScanCardThreadStop = false;
         private SafeThread AnalyzeThread = null;
-        private bool AnalyzeThreadStop = false;
+        private volatile bool AnalyzeThreadStop = false;
         private SafeThread EncodeThread = null;
         private SafeThread LogThread;
         private bool LogThreadStop;
         private SafeThread UpdateCheckThread = null;
 
         private string CurrentDirectory = null;
+        private FileSystemWatcher DirectoryWatcher = null;
         private bool AutoOpenDrive = true;
         private Dictionary<ListViewTag, ListViewItem> RegisteredItems = new Dictionary<ListViewTag, ListViewItem>();
 
@@ -60,9 +61,9 @@ namespace TeddyBench
         private string TitleString => "TeddyBench - " + GetVersion();
 
         private SafeThread PlayThread = null;
-        private bool PlayThreadStop = true;
-        private bool TrackMouseDown = false;
-        private int TrackNewPosition = -1;
+        private volatile bool PlayThreadStop = true;
+        private volatile bool TrackMouseDown = false;
+        private volatile int TrackNewPosition = -1;
 
         public class ListViewTag
         {
@@ -149,9 +150,11 @@ namespace TeddyBench
                     {
                         TonieInfoString = "| Downloading...";
                         HttpWebRequest request = (HttpWebRequest)WebRequest.Create("https://api.revvox.de/tonies.json?source=TeddyBench&version=" + ThisAssembly.Git.BaseTag);
-                        HttpWebResponse response = (HttpWebResponse)request.GetResponse();
-                        TextReader reader = new StreamReader(response.GetResponseStream());
-                        jsonContent = reader.ReadToEnd();
+                        using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                        using (TextReader reader = new StreamReader(response.GetResponseStream()))
+                        {
+                            jsonContent = reader.ReadToEnd();
+                        }
                         TonieInfoString = "| Downloaded";
                     }
                     catch (Exception e)
@@ -231,11 +234,13 @@ namespace TeddyBench
                     catch (Exception e)
                     {
                         TonieInfoCustom.Clear();
+                        LogWindow.Log(LogWindow.eLogLevel.Error, "Failed to read customTonies.json: " + e.Message);
                     }
                 }
             }
             catch (Exception e)
             {
+                LogWindow.Log(LogWindow.eLogLevel.Error, "Failed to load tonie database: " + e.ToString());
                 return;
             }
         }
@@ -250,6 +255,7 @@ namespace TeddyBench
                 }
                 catch (Exception e)
                 {
+                    LogWindow.Log(LogWindow.eLogLevel.Error, "Failed to save customTonies.json: " + e.Message);
                     return;
                 }
             }
@@ -259,6 +265,7 @@ namespace TeddyBench
         {
             InitializeComponent();
             Log = new LogWindow();
+            TonieLog.Handler = msg => LogWindow.Log(LogWindow.eLogLevel.Debug, msg);
 
             Settings = Settings.FromFile("teddyBench.cfg");
 
@@ -511,7 +518,14 @@ namespace TeddyBench
             }
         }
 
-        public async void UpdateCheck()
+        public void UpdateCheck()
+        {
+            /* runs on a dedicated SafeThread; block it instead of 'async void', whose
+               first await would end the thread and let exceptions escape the wrapper */
+            UpdateCheckAsync().GetAwaiter().GetResult();
+        }
+
+        private async Task UpdateCheckAsync()
         {
             try
             {
@@ -520,18 +534,25 @@ namespace TeddyBench
                 {
                     Thread.Sleep(2000);
 
-                    HttpClient client = new HttpClient();
+                    using (HttpClient client = new HttpClient())
+                    {
                     client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; TeddyBench/1.0)");
                     async Task<JObject> GithubApiGet(string path) => JObject.Parse(await client.GetStringAsync($"https://api.github.com/{path}"));
                     async Task<JObject> GithubLastRelease(string user, string repo) => await GithubApiGet($"repos/{user}/{repo}/releases/latest");
 
+                    /* runs later from the UI thread, after the outer client is disposed - use its own client
+                       and copy asynchronously so the UI thread is not blocked for the whole download */
                     async Task DownloadFile(string url, string destinationFileName)
                     {
-                        using (var stream = await client.GetStreamAsync(url))
+                        using (var downloadClient = new HttpClient())
                         {
-                            using (var file = new FileStream(destinationFileName, FileMode.Create))
+                            downloadClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; TeddyBench/1.0)");
+                            using (var stream = await downloadClient.GetStreamAsync(url))
                             {
-                                stream.CopyTo(file);
+                                using (var file = new FileStream(destinationFileName, FileMode.Create))
+                                {
+                                    await stream.CopyToAsync(file);
+                                }
                             }
                         }
                     }
@@ -565,10 +586,12 @@ namespace TeddyBench
                             }));
                         }
                     }
+                    }
                 }
             }
             catch (Exception ex)
             {
+                LogWindow.Log(LogWindow.eLogLevel.Debug, "Update check failed: " + ex.Message);
             }
         }
 
@@ -690,6 +713,7 @@ namespace TeddyBench
                             }
                             catch (Exception ex)
                             {
+                                LogWindow.Log(LogWindow.eLogLevel.DebugVerbose, "Probing drive " + drive.Name + " failed: " + ex.Message);
                             }
                         }
                     }
@@ -718,6 +742,7 @@ namespace TeddyBench
                 }
                 catch (Exception ex)
                 {
+                    LogWindow.Log(LogWindow.eLogLevel.Debug, "Drive scan failed: " + ex.Message);
                 }
 
                 Thread.Sleep(500);
@@ -782,6 +807,9 @@ namespace TeddyBench
 
             CurrentDirectory = rootDirectory;
 
+            /* dispose the previous watcher, else every opened directory keeps firing refreshes */
+            DirectoryWatcher?.Dispose();
+
             FileSystemWatcher watcher = new FileSystemWatcher(CurrentDirectory);
 
             watcher.Changed += OnDirectoryChanged;
@@ -790,6 +818,7 @@ namespace TeddyBench
             watcher.Renamed += OnDirectoryChanged;
 
             watcher.EnableRaisingEvents = true;
+            DirectoryWatcher = watcher;
             RefreshCardContent();
         }
 
@@ -1029,6 +1058,7 @@ namespace TeddyBench
                             }
                             catch (Exception ex)
                             {
+                                LogWindow.Log(LogWindow.eLogLevel.Debug, "Analyzing item failed: " + ex.Message);
                             }
                         }
                     }
@@ -1055,13 +1085,17 @@ namespace TeddyBench
             }
             catch (Exception ex)
             {
+                LogWindow.Log(LogWindow.eLogLevel.Debug, "Reading cached image '" + cacheFileName + "' failed: " + ex.Message);
             }
 
             try
             {
+                Image img;
                 HttpWebRequest request = (HttpWebRequest)WebRequest.Create(pic);
-                HttpWebResponse response = (HttpWebResponse)request.GetResponse();
-                Image img = ResizeImage(Image.FromStream(response.GetResponseStream()), 128, 128);
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                {
+                    img = ResizeImage(Image.FromStream(response.GetResponseStream()), 128, 128);
+                }
 
                 try
                 {
@@ -1069,11 +1103,13 @@ namespace TeddyBench
                 }
                 catch (Exception ex)
                 {
+                    LogWindow.Log(LogWindow.eLogLevel.Debug, "Caching image '" + cacheFileName + "' failed: " + ex.Message);
                 }
                 return img;
             }
             catch (Exception ex)
             {
+                LogWindow.Log(LogWindow.eLogLevel.Debug, "Downloading image '" + pic + "' failed: " + ex.Message);
             }
 
             return null;
@@ -1222,7 +1258,7 @@ namespace TeddyBench
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("Failed to create directory '" + newDir + "'");
+                    MessageBox.Show("Failed to create directory '" + newDir + "': " + ex.Message);
                     return;
                 }
 
@@ -1232,7 +1268,7 @@ namespace TeddyBench
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("Failed to write file '" + newFile + "'");
+                    MessageBox.Show("Failed to write file '" + newFile + "': " + ex.Message);
                     return;
                 }
 
@@ -1330,7 +1366,7 @@ namespace TeddyBench
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("Failed to create directory '" + newDir + "'");
+                    MessageBox.Show("Failed to create directory '" + newDir + "': " + ex.Message);
                     return;
                 }
                 try
@@ -1339,7 +1375,7 @@ namespace TeddyBench
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("Failed to write file '" + newFile + "'");
+                    MessageBox.Show("Failed to write file '" + newFile + "': " + ex.Message);
                     return;
                 }
 
@@ -1540,7 +1576,7 @@ namespace TeddyBench
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show("Failed to create directory '" + newDir + "'", "Re-assigning UID failed");
+                        MessageBox.Show("Failed to create directory '" + newDir + "': " + ex.Message, "Re-assigning UID failed");
                         return;
                     }
 
@@ -1559,7 +1595,7 @@ namespace TeddyBench
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show("Failed to write file '" + newFile + "'", "Re-assigning UID failed");
+                        MessageBox.Show("Failed to write file '" + newFile + "': " + ex.Message, "Re-assigning UID failed");
                         return;
                     }
 
@@ -1608,7 +1644,7 @@ namespace TeddyBench
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("Failed to delete file/directory '" + tag.FileName + "'");
+                    MessageBox.Show("Failed to delete file/directory '" + tag.FileName + "': " + ex.Message);
                     return;
                 }
             }
@@ -1706,7 +1742,7 @@ namespace TeddyBench
 
                         if (!Directory.Exists(outDirectory))
                         {
-                            Console.WriteLine("Error: Output directory '" + outDirectory + "' does not exist");
+                            MessageBox.Show("Output directory '" + outDirectory + "' does not exist", "Export failed");
                             return;
                         }
 
@@ -1716,13 +1752,13 @@ namespace TeddyBench
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine("[ERROR] Failed to write .ogg/.cue'");
-                            Console.WriteLine("   Message:    " + ex.Message);
+                            LogWindow.Log(LogWindow.eLogLevel.Error, "Failed to write .ogg/.cue: " + ex.ToString());
+                            MessageBox.Show("Failed to write .ogg/.cue: " + ex.Message, "Export failed");
                         }
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show("Failed to save file '" + tag.FileName + "'");
+                        MessageBox.Show("Failed to save file '" + tag.FileName + "': " + ex.Message);
                         return;
                     }
                 }
@@ -2016,28 +2052,32 @@ namespace TeddyBench
 
             try
             {
-                HttpClient httpClient = new HttpClient();
-                MultipartFormDataContent form = new MultipartFormDataContent();
+                using (HttpClient httpClient = new HttpClient())
+                using (MultipartFormDataContent form = new MultipartFormDataContent())
+                {
+                    form.Add(new StringContent(sender), "sender");
+                    form.Add(new StringContent(payload), "payload");
+                    form.Add(new StringContent(message), "message");
+                    form.Add(new StringContent(filename), "filename");
+                    form.Add(new StringContent(GetVersion()), "version");
 
-                form.Add(new StringContent(sender), "sender");
-                form.Add(new StringContent(payload), "payload");
-                form.Add(new StringContent(message), "message");
-                form.Add(new StringContent(filename), "filename");
-                form.Add(new StringContent(GetVersion()), "version");
+                    using (HttpResponseMessage response = await httpClient.PostAsync("https://api.revvox.de/diag", form).ConfigureAwait(false))
+                    {
+                        response.EnsureSuccessStatusCode();
+                        string sd = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
-                HttpResponseMessage response = await httpClient.PostAsync("https://api.revvox.de/diag", form);
-                response.EnsureSuccessStatusCode();
-                httpClient.Dispose();
-                string sd = response.Content.ReadAsStringAsync().Result;
+                        LogWindow.Log(LogWindow.eLogLevel.Debug, sd);
 
-                LogWindow.Log(LogWindow.eLogLevel.Debug, sd);
-
-                ret.Success = (response.StatusCode == HttpStatusCode.OK);
-                ret.Message = sd;
-                return ret;
+                        ret.Success = (response.StatusCode == HttpStatusCode.OK);
+                        ret.Message = sd;
+                        return ret;
+                    }
+                }
             }
             catch (Exception ee)
             {
+                LogWindow.Log(LogWindow.eLogLevel.Error, "Sending diagnostics report failed: " + ee.Message);
+                ret.Message = ee.Message;
             }
             return ret;
         }
@@ -2258,6 +2298,7 @@ namespace TeddyBench
             }
             catch (Exception ex)
             {
+                LogWindow.Log(LogWindow.eLogLevel.Error, "Antenna measurement failed: " + ex.ToString());
             }
         }
 
@@ -2275,6 +2316,8 @@ namespace TeddyBench
                 }
                 catch (Exception ex)
                 {
+                    LogWindow.Log(LogWindow.eLogLevel.Error, "Entering bootloader failed: " + ex.ToString());
+                    MessageBox.Show("Failed to flash: " + ex.Message, "Failed");
                 }
             }
         }
@@ -2293,6 +2336,8 @@ namespace TeddyBench
                 }
                 catch (Exception ex)
                 {
+                    LogWindow.Log(LogWindow.eLogLevel.Error, "Entering bootloader failed: " + ex.ToString());
+                    MessageBox.Show("Failed to flash: " + ex.Message, "Failed");
                 }
             }
         }
@@ -2377,6 +2422,17 @@ namespace TeddyBench
                     {
                         MessageBox.Show("Failed to play file '" + tag.FileName + "': " + ex.Message);
                     }
+                    finally
+                    {
+                        /* also reached when playback never started - without this the
+                           Play button stayed dead until restart */
+                        BeginInvoke(new Action(() =>
+                        {
+                            PlayThreadStop = true;
+                            btnPlay.Text = "Play file";
+                            PlayThread = null;
+                        }));
+                    }
                 }, "PlayThread");
 
                 btnPlay.Text = "Stop";
@@ -2418,6 +2474,18 @@ namespace TeddyBench
 
         internal void ReportException(string name, Exception e)
         {
+            /* called from the UI thread (Application.ThreadException) and from background
+               SafeThreads - the dialogs and the awaited send must run on the UI thread */
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(() => ReportException(name, e)));
+                return;
+            }
+            ReportExceptionOnUiThread(name, e);
+        }
+
+        private async void ReportExceptionOnUiThread(string name, Exception e)
+        {
             if (MessageBox.Show("Sorry, there was an exception in '" + name + "'. Do you want to report that crash?", "Some Exception happened", MessageBoxButtons.YesNo) == DialogResult.No)
             {
                 return;
@@ -2425,20 +2493,15 @@ namespace TeddyBench
 
             StringBuilder str = new StringBuilder();
 
-            str.AppendLine(" Reporting an unhandled eception");
+            str.AppendLine(" Reporting an unhandled exception");
             str.AppendLine("-----------------------------------");
 
             str.AppendLine("Thread: '" + name + "'");
             str.AppendLine("");
             str.AppendLine("-----------------------------------");
             str.AppendLine("");
-            str.AppendLine("Message:");
-            str.AppendLine(e.Message);
-            str.AppendLine("");
-            str.AppendLine("-----------------------------------");
-            str.AppendLine("");
-            str.AppendLine("StackTrace:");
-            str.AppendLine(e.StackTrace);
+            str.AppendLine("Exception:");
+            str.AppendLine(e.ToString());
             str.AppendLine("");
             str.AppendLine("-----------------------------------");
             str.AppendLine("");
@@ -2451,7 +2514,8 @@ namespace TeddyBench
                 Settings.Username = form.Username;
                 SaveSettings();
 
-                DiagStatus ret = DiagnosticsSendInfo(str.ToString(), form.Username, form.Message, "Exception.txt").Result;
+                /* awaiting instead of .Result - blocking the UI thread here deadlocked the app */
+                DiagStatus ret = await DiagnosticsSendInfo(str.ToString(), form.Username, form.Message, "Exception.txt");
                 if (ret.Success)
                 {
                     MessageBox.Show("Report Successfully sent." + Environment.NewLine + "Server response:" + Environment.NewLine + ret.Message + "", "Report sent", MessageBoxButtons.OK, MessageBoxIcon.Information);

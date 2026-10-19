@@ -24,8 +24,13 @@ namespace TeddyBench
             {
                 s = JsonConvert.DeserializeObject<Settings>(File.ReadAllText(file));
             }
-            catch(Exception ex)
+            catch (FileNotFoundException ex)
             {
+                /* first start - defaults apply */
+            }
+            catch (Exception ex)
+            {
+                LogWindow.Log(LogWindow.eLogLevel.Error, "Failed to load settings from '" + file + "': " + ex.Message);
             }
 
             if(s != null)
@@ -45,6 +50,7 @@ namespace TeddyBench
             }
             catch (Exception e)
             {
+                LogWindow.Log(LogWindow.eLogLevel.Error, "Failed to save settings to '" + file + "': " + e.Message);
             }
             return false;
         }
